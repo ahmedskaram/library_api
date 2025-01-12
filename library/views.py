@@ -1,30 +1,33 @@
-from rest_framework.response import Response
-from rest_framework.decorators import action
+from rest_framework import viewsets, serializers
+from .models import Book, Transaction
+from .serializers import BookSerializer, TransactionSerializer
+from rest_framework.permissions import IsAuthenticated
 
-class TransactionViewSet(viewsets.ViewSet):
-    @action(detail=False, methods=['post'])
-    def checkout(self, request):
-        user = request.user
-        book_id = request.data.get('book_id')
-        book = Book.objects.get(id=book_id)
+class BookViewSet(viewsets.ModelViewSet):
+    queryset = Book.objects.all()
+    serializer_class = BookSerializer
+    permission_classes = [IsAuthenticated]
 
-        if book.copies_available > 0:
-            Transaction.objects.create(user=user, book=book)
-            book.copies_available -= 1
+##########################################################################################
+
+class TransactionViewSet(viewsets.ModelViewSet):
+    queryset = Transaction.objects.all()
+    serializer_class = TransactionSerializer
+    permission_classes = [IsAuthenticated]
+
+    def perform_create(self, serializer):
+        book = serializer.validated_data['book']
+        if book.copies_available <= 0:
+            raise serializers.ValidationError("This book is not available for checkout.")
+        book.copies_available -= 1
+        book.save()
+        serializer.save()
+
+    def perform_update(self, serializer):
+        instance = serializer.save()
+        if instance.return_date:
+            book = instance.book
+            book.copies_available += 1
             book.save()
-            return Response({'message': 'Book checked out successfully!'})
-        return Response({'error': 'No copies available!'}, status=400)
 
-    @action(detail=False, methods=['post'])
-    def return_book(self, request):
-        user = request.user
-        transaction_id = request.data.get('transaction_id')
-        transaction = Transaction.objects.get(id=transaction_id, user=user)
-
-        if transaction and not transaction.return_date:
-            transaction.return_date = timezone.now()
-            transaction.save()
-            transaction.book.copies_available += 1
-            transaction.book.save()
-            return Response({'message': 'Book returned successfully!'})
-        return Response({'error': 'Invalid transaction!'}, status=400)
+##########################################################################################
